@@ -77,18 +77,22 @@ def tryon():
     person = person_orig.copy()
     cloth = decode(c_b64, (768, 1024))
 
-    # HD Mask - Dress area only - Perfect fit
-    mask = None
+    # --- 1. Full body mask - 100% dress remove (Jacket, sleeves, dress ellam poayidum!) ---
+    mask = Image.new("L", (768, 1024), 0)
+    draw = ImageDraw.Draw(mask)
+    draw.rectangle([50, 200, 718, 1024], fill=255)
+
+    # 2. Automasker iruntha serthu perusa akkalam
     if automasker:
         try:
-            mask = automasker(person, cloth_type="overall")[0].resize((768, 1024))
+            auto_m = automasker(person, cloth_type="overall")[0].resize((768, 1024))
+            combined = Image.new("L", (768, 1024), 0)
+            combined.paste(auto_m, (0, 0))
+            draw2 = ImageDraw.Draw(combined)
+            draw2.rectangle([50, 200, 718, 1024], fill=255)
+            mask = combined
         except Exception as e:
-            print(f"Automasker error: {e}")
-            mask = None
-
-    if mask is None:
-        mask = Image.new("L", (768, 1024), 0)
-        ImageDraw.Draw(mask).rectangle([76, 300, 692, 1024], fill=255)
+            print(f"Automasker merge error: {e}")
 
     # Generate
     try:
