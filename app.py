@@ -1,8 +1,14 @@
+# pyright: reportMissingImports=false
 from flask import Flask, request, jsonify
 from PIL import Image, ImageDraw
-import torch, io, base64, os
+import io, base64, os
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
+try:
+    import torch  # type: ignore
+except ImportError:
+    torch = None  # type: ignore
+
+device = "cuda" if (torch and torch.cuda.is_available()) else "cpu"
 app = Flask(__name__)
 
 # Enable CORS for frontend integration
@@ -15,14 +21,14 @@ def after_request(response):
 
 print(f"Loading VASTRA on {device}...")
 try:
-    from model.pipeline import CatVTONPipeline
-    from model.cloth_masker import AutoMasker
+    from model.pipeline import CatVTONPipeline  # type: ignore
+    from model.cloth_masker import AutoMasker  # type: ignore
     automasker = AutoMasker(device=device)
     pipeline = CatVTONPipeline(
         base_ckpt="runwayml/stable-diffusion-inpainting",
         attn_ckpt="zhengchong/CatVTON",
         attn_ckpt_version="mix",
-        weight_dtype=torch.float16 if device == "cuda" else torch.float32,
+        weight_dtype=(torch.float16 if device == "cuda" else torch.float32) if torch else None,
         device=device
     )
     print("VASTRA loaded successfully!")
@@ -86,6 +92,8 @@ def tryon():
 
     # Generate
     try:
+        if torch is None or pipeline is None:
+            raise RuntimeError("PyTorch or CatVTON pipeline is not loaded.")
         with torch.inference_mode():
             gen = pipeline(
                 image=person,
