@@ -75,11 +75,21 @@ async def tryon(
         if Client is None or handle_file is None:
             return {"status": "error", "message": "gradio_client not installed on server"}
 
+        hf_token = os.environ.get("HF_TOKEN", None)
         generated_file = None
+
+        saree_prompt = (
+            "Kanchipuram silk saree, Kanjivaram Bridal Crimson Red and gold, "
+            "REAL INDIAN SAREE, NOT DRESS, NOT SHORT DRESS, "
+            "floor length 6 yard saree covering legs fully till feet, "
+            "nivi drape with pleats in front tucked into petticoat, "
+            "pallu on left shoulder with heavy zari border and tassels, "
+            "legs fully covered, traditional South Indian bridal saree"
+        )
 
         # TRY 1: Leffa - Best quality & stability
         try:
-            client = Client("franciszzj/Leffa")
+            client = Client("franciszzj/Leffa", hf_token=hf_token)
             result = client.predict(
                 src_image_path=handle_file(person_path),
                 ref_image_path=handle_file(cloth_path),
@@ -101,22 +111,26 @@ async def tryon(
             print(f"Leffa failed: {e1}, attempting fallback to IDM-VTON...")
 
             # TRY 2: IDM-VTON Fallback
-            client2 = Client("yisol/IDM-VTON")
-            result2 = client2.predict(
-                dict={"background": handle_file(person_path), "layers": [], "composite": None},
-                garm_img=handle_file(cloth_path),
-                garment_des="saree, upper body garment",
-                is_checked=True,
-                is_checked_crop=False,
-                denoise_steps=30,
-                seed=42,
-                api_name="/tryon"
-            )
-            print(f"IDM-VTON Success: {result2}")
-            if isinstance(result2, (list, tuple)):
-                generated_file = result2[0]
-            else:
-                generated_file = result2
+            try:
+                client2 = Client("yisol/IDM-VTON", hf_token=hf_token)
+                result2 = client2.predict(
+                    dict={"background": handle_file(person_path), "layers": [], "composite": None},
+                    garm_img=handle_file(cloth_path),
+                    garment_des=saree_prompt,
+                    is_checked=True,
+                    is_checked_crop=False,
+                    denoise_steps=30,
+                    seed=42,
+                    api_name="/tryon"
+                )
+                print(f"IDM-VTON Success: {result2}")
+                if isinstance(result2, (list, tuple)):
+                    generated_file = result2[0]
+                else:
+                    generated_file = result2
+            except Exception as e2:
+                print(f"IDM-VTON failed: {e2}")
+                raise e2
 
         if not generated_file or not os.path.exists(generated_file):
             return {
