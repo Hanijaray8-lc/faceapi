@@ -1,8 +1,5 @@
---extra-index-url https://download.pytorch.org/whl/cpu
-torch
-torchvision
-flask
+fastapi
+uvicorn
+python-multipart
 pillow
-diffusers
-transformers
-accelerate
+gradio_client

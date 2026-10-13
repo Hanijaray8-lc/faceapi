@@ -1,128 +1,97 @@
-# pyright: reportMissingImports=false
-from flask import Flask, request, jsonify
-from PIL import Image, ImageDraw
-import io, base64, os
+from fastapi import FastAPI, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
+from gradio_client import Client
+import os, uuid, shutil, base64
 
-try:
-    import torch  # type: ignore
-except ImportError:
-    torch = None  # type: ignore
+app = FastAPI(title="VASTRA FREE UNLIMITED")
 
-device = "cuda" if (torch and torch.cuda.is_available()) else "cpu"
-app = Flask(__name__)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Enable CORS for frontend integration
-@app.after_request
-def after_request(response):
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
-    response.headers.add("Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS")
-    return response
-
-print(f"Loading VASTRA on {device}...")
-try:
-    from model.pipeline import CatVTONPipeline  # type: ignore
-    from model.cloth_masker import AutoMasker  # type: ignore
-    automasker = AutoMasker(device=device)
-    pipeline = CatVTONPipeline(
-        base_ckpt="runwayml/stable-diffusion-inpainting",
-        attn_ckpt="zhengchong/CatVTON",
-        attn_ckpt_version="mix",
-        weight_dtype=(torch.float16 if device == "cuda" else torch.float32) if torch else None,
-        device=device
-    )
-    print("VASTRA loaded successfully!")
-except Exception as e:
-    print(f"Model load: {e}")
-    automasker = None
-    pipeline = None
-
-def decode(b64, target_size=(768, 1024)):
-    if ',' in b64:
-        b64 = b64.split(',')[1]
-    img = Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGB")
-    return img.resize(target_size, Image.LANCZOS)
-
-def encode(img):
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=90)
-    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
-
-@app.route("/")
+@app.get("/")
 def home():
-    return jsonify({
+    return {
+        "engine": "VASTRA FREE UNLIMITED - Face Same + Dress Fit",
         "status": "ok",
-        "engine": "VASTRA HD 4K - Face Same + Dress Fit",
-        "resolution": "768x1024 HD",
-        "steps": 40,
-        "quality": "high"
-    })
+        "gpu": "HF ZeroGPU - No Render GPU needed"
+    }
 
-@app.route("/tryon", methods=["POST", "OPTIONS"])
-def tryon():
-    if request.method == "OPTIONS":
-        return jsonify({"status": "ok"}), 200
+@app.post("/tryon")
+async def tryon(person: UploadFile = File(...), cloth: UploadFile = File(...)):
+    tmp_dir = "/tmp"
+    os.makedirs(tmp_dir, exist_ok=True)
+    pid = str(uuid.uuid4())[:8]
 
-    if pipeline is None:
-        return jsonify({"status": "error", "message": "Model not loaded"}), 500
+    person_path = f"{tmp_dir}/{pid}_person.jpg"
+    cloth_path = f"{tmp_dir}/{pid}_cloth.jpg"
 
-    data = request.get_json(force=True)
-    p_b64 = data.get("person_image") or data.get("personImage")
-    c_b64 = data.get("cloth_image") or data.get("garmentImage")
-
-    if not p_b64 or not c_b64:
-        return jsonify({"status": "error", "message": "person and cloth images required"}), 400
-
-    person_orig = decode(p_b64, (768, 1024))
-    person = person_orig.copy()
-    cloth = decode(c_b64, (768, 1024))
-
-    # --- 1. Full body mask - 100% dress remove (Jacket, sleeves, dress ellam poayidum!) ---
-    mask = Image.new("L", (768, 1024), 0)
-    draw = ImageDraw.Draw(mask)
-    draw.rectangle([50, 200, 718, 1024], fill=255)
-
-    # 2. Automasker iruntha serthu perusa akkalam
-    if automasker:
-        try:
-            auto_m = automasker(person, cloth_type="overall")[0].resize((768, 1024))
-            combined = Image.new("L", (768, 1024), 0)
-            combined.paste(auto_m, (0, 0))
-            draw2 = ImageDraw.Draw(combined)
-            draw2.rectangle([50, 200, 718, 1024], fill=255)
-            mask = combined
-        except Exception as e:
-            print(f"Automasker merge error: {e}")
-
-    # Generate
     try:
-        if torch is None or pipeline is None:
-            raise RuntimeError("PyTorch or CatVTON pipeline is not loaded.")
-        with torch.inference_mode():
-            gen = pipeline(
-                image=person,
-                condition_image=cloth,
-                mask=mask,
-                num_inference_steps=40,
-                guidance_scale=2.5,
-                seed=42
-            )[0]
+        # Save files
+        with open(person_path, "wb") as f:
+            f.write(await person.read())
+        with open(cloth_path, "wb") as f:
+            f.write(await cloth.read())
+
+        print("Connecting to HF Free Space...")
+
+        # TRY 1: Leffa - Most stable & fast for saree/dress
+        try:
+            client = Client("franciszzj/Leffa", download_files=False)
+            result = client.predict(
+                src_image_path=person_path,
+                ref_image_path=cloth_path,
+                ref_accelerate=False,
+                step=30,
+                scale=2.5,
+                seed=42,
+                vt_model_type="viton_hd",
+                vt_garment_type="upper_body",
+                vt_reward_type="t2i",
+                api_name="/leffa_predict_vt"
+            )
+            print(f"Leffa Success: {result}")
+            # result is image path url
+            return {"image": result, "status": "success", "engine": "Leffa HD - Free"}
+
+        except Exception as e1:
+            print(f"Leffa failed: {e1}, trying IDM-VTON...")
+
+            # TRY 2: IDM-VTON Fallback
+            client2 = Client("yisol/IDM-VTON")
+            result2 = client2.predict(
+                dict={"background": open(person_path, "rb"), "layers": [], "composite": None},
+                garm_img=open(cloth_path, "rb"),
+                garment_des="saree, upper body garment",
+                is_checked=True,
+                is_checked_crop=False,
+                denoise_steps=30,
+                seed=42,
+                api_name="/tryon"
+            )
+            print(f"IDM-VTON Success: {result2}")
+            return {"image": result2[0] if isinstance(result2, list) else result2, "status": "success", "engine": "IDM-VTON - Free"}
+
     except Exception as e:
-        print(f"Inference error: {e}")
-        return jsonify({"status": "error", "message": f"Generation failed: {str(e)}"}), 500
-
-    # FACE/BG/HAIR SAME - Key!
-    final = Image.composite(gen, person, mask)
-    face_h = int(1024 * 0.32)
-    final.paste(person_orig.crop((0, 0, 768, face_h)), (0, 0))
-
-    result_data = encode(final)
-    return jsonify({
-        "status": "success",
-        "result_image": result_data,
-        "resultImage": result_data
-    })
+        print(f"FINAL ERROR: {e}")
+        return {
+            "error": str(e),
+            "status": "retry",
+            "tip": "HF Space busy, queue la irukku ma - 20 sec kalichu thirumba try pannu ma"
+        }
+    finally:
+        # Cleanup
+        try:
+            os.remove(person_path)
+            os.remove(cloth_path)
+        except:
+            pass
 
 if __name__ == "__main__":
+    import uvicorn
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    uvicorn.run("app:app", host="0.0.0.0", port=port)
