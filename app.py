@@ -1,12 +1,12 @@
 # pyright: reportMissingImports=false
 # pyright: reportUnusedImport=false
-from fastapi import FastAPI, Request, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Request, UploadFile, File  # type: ignore
+from fastapi.middleware.cors import CORSMiddleware  # type: ignore
 import os, io, uuid, tempfile, base64
-from PIL import Image
+from PIL import Image  # type: ignore
 
 try:
-    from gradio_client import Client, handle_file
+    from gradio_client import Client, handle_file  # type: ignore
 except ImportError:
     Client = None
     handle_file = None
@@ -88,7 +88,7 @@ async def tryon(
                 scale=2.5,
                 seed=42,
                 vt_model_type="viton_hd",
-                vt_garment_type="upper_body",
+                vt_garment_type="dress",
                 vt_reward_type="t2i",
                 api_name="/leffa_predict_vt"
             )
@@ -149,6 +149,6 @@ async def tryon(
                     pass
 
 if __name__ == "__main__":
-    import uvicorn
+    import uvicorn  # type: ignore
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
